@@ -1,0 +1,15 @@
+{
+  "name": "Pourwise — Water Sort Engine",
+  "short_name": "Pourwise",
+  "description": "Board builder, move advisor, and full solver for hidden-color water sort puzzles.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#11141a",
+  "theme_color": "#11141a",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
