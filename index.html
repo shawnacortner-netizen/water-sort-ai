@@ -592,7 +592,15 @@ function monteCarloConfidence(state, opts){
 function lookahead(state, depth){ return beamLookahead(state, depth, 3); }
 function advise(state, opts){
   opts=opts||{}; const depth=opts.depth||8, topN=opts.topN||3, rollouts=opts.rollouts||10;
-  const moves=usefulMoves(state); const results=[]; const baseline=evaluate(state);
+  const avoidStateHashes = opts.avoidStateHashes || null;
+  let moves=usefulMoves(state);
+  if(avoidStateHashes && avoidStateHashes.size){
+    moves = moves.filter(m=>{
+      const {state:ns} = applyMove(state, m.from, m.to);
+      return !avoidStateHashes.has(hashState(ns));
+    });
+  }
+  const results=[]; const baseline=evaluate(state);
   const baselineTrapped=trappedPenalty(state);
   for(const m of moves){
     const before=state;
@@ -652,6 +660,7 @@ let state = null;            // {capacity, tubes}
 let buildPaint = COLORS[0].id; // currently selected paint in build mode
 let selected = null;          // selected tube index in play mode
 let history = [];             // for undo, stack of previous states
+let visitedStates = new Set(); // hashes of every state seen this play session, for loop detection
 let pendingReveal = null;     // {tubeIndex} awaiting modal input
 let lastSolve = null;
 
@@ -659,6 +668,7 @@ function freshTubes(count, cap){ return Array.from({length:count}, ()=>[]); }
 
 function init(){
   state = { capacity: 4, tubes: freshTubes(6, 4) };
+  visitedStates = new Set([hashState(state)]);
   renderAll();
   buildPalette();
   wireEvents();
@@ -689,7 +699,7 @@ function renderBoard(){
   board.innerHTML = '';
   state.tubes.forEach((tube, idx)=>{
     const wrap = document.createElement('div'); wrap.className='tube-wrap';
-    const label = document.createElement('div'); label.className='tube-idx'; label.textContent = '#'+idx;
+    const label = document.createElement('div'); label.className='tube-idx'; label.textContent = '#'+(idx+1);
     const tubeEl = document.createElement('div'); tubeEl.className='tube';
     if(selected===idx) tubeEl.classList.add('selected');
     if(isTubeSolved(tube, state.capacity)) tubeEl.classList.add('solved');
@@ -749,6 +759,7 @@ function onTubeClick(idx){
   history.push(cloneState(state));
   const {state:next} = applyMove(state, selected, idx);
   state = next;
+  visitedStates.add(hashState(state));
   const fromIdx = selected;
   selected = null;
   renderBoard();
@@ -805,13 +816,18 @@ function renderAdvicePanel(adviceList){
   panel.innerHTML = '';
   if(status) panel.appendChild(status);
   if(!adviceList || adviceList.length===0){
-    setStatus('No legal moves available from this position.', 'bad');
+    const anyMovesAtAll = usefulMoves(state).length > 0;
+    if(anyMovesAtAll){
+      setStatus('Every remaining move would repeat a position already tried this session \u2014 try Undo, or Solve for a full plan.', 'bad');
+    } else {
+      setStatus('No legal moves available from this position.', 'bad');
+    }
     return;
   }
   adviceList.forEach(a=>{
     const card = document.createElement('div'); card.className='card';
     const row1 = document.createElement('div'); row1.className='row1';
-    const label = document.createElement('div'); label.className='move-label'; label.textContent = `#${a.from} \u2192 #${a.to}`;
+    const label = document.createElement('div'); label.className='move-label'; label.textContent = `#${a.from+1} \u2192 #${a.to+1}`;
     const stars = document.createElement('div'); stars.className='stars'; stars.textContent = '\u2605'.repeat(a.stars) + '\u2606'.repeat(5-a.stars);
     row1.appendChild(label); row1.appendChild(stars);
     const reasons = document.createElement('ul'); reasons.className='reasons';
@@ -820,10 +836,10 @@ function renderAdvicePanel(adviceList){
     const conf = document.createElement('div'); conf.className='confidence'; conf.textContent = `confidence ${a.confidence}%`;
     const doBtn = document.createElement('button'); doBtn.className='do'; doBtn.textContent='Play this move';
     doBtn.addEventListener('click', ()=>{
-      if(mode!=='play'){ mode='play'; setModeButtons(); }
+      if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
       history.push(cloneState(state));
       const {state:next, info} = applyMove(state, a.from, a.to);
-      state = next; renderBoard();
+      state = next; visitedStates.add(hashState(state)); renderBoard();
       if(info.revealsUnknown){ pendingReveal={tubeIndex:a.from}; openRevealModal(a.from); }
       else setStatus(isSolved(state)?'Solved! \u2728':'Move applied.', isSolved(state)?'good':null);
       saveLastPuzzleSnapshot();
@@ -842,7 +858,7 @@ function renderSolvePanel(result){
     setStatus(`Solution found \u2014 ${result.moves.length} moves.`, 'good');
     const steps = document.createElement('div'); steps.className='solve-steps';
     result.moves.forEach((m,i)=>{
-      const s=document.createElement('span'); s.textContent=`${i+1}. #${m.from}\u2192#${m.to}${m.revealsUnknown?' \u26a0':''}`;
+      const s=document.createElement('span'); s.textContent=`${i+1}. #${m.from+1}\u2192#${m.to+1}${m.revealsUnknown?' \u26a0':''}`;
       steps.appendChild(s);
     });
     card.appendChild(steps);
@@ -900,7 +916,7 @@ async function loadLastPuzzle(){
 /* ---------- events ---------- */
 function wireEvents(){
   document.getElementById('modeBuildBtn').addEventListener('click', ()=>{ mode='build'; setModeButtons(); });
-  document.getElementById('modePlayBtn').addEventListener('click', ()=>{ mode='play'; setModeButtons(); });
+  document.getElementById('modePlayBtn').addEventListener('click', ()=>{ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); });
   document.getElementById('modeScanBtn').addEventListener('click', ()=>{ mode='scan'; setModeButtons(); });
   initScanUI();
 
@@ -908,7 +924,7 @@ function wireEvents(){
     const cap = Math.max(2, Math.min(8, parseInt(document.getElementById('capInput').value)||4));
     const count = Math.max(2, Math.min(16, parseInt(document.getElementById('tubeCountInput').value)||6));
     state = { capacity: cap, tubes: freshTubes(count, cap) };
-    history = []; selected=null; lastSolve=null;
+    history = []; visitedStates = new Set([hashState(state)]); selected=null; lastSolve=null;
     document.getElementById('panel').innerHTML='';
     renderBoard();
   });
@@ -919,14 +935,14 @@ function wireEvents(){
     state = { capacity: last.capacity, tubes: last.tubes.map(t=>t.slice()) };
     document.getElementById('capInput').value = state.capacity;
     document.getElementById('tubeCountInput').value = state.tubes.length;
-    history=[]; selected=null;
+    history=[]; visitedStates = new Set([hashState(state)]); selected=null;
     renderBoard();
     setStatus('Duplicated your last puzzle \u2014 edit any tubes that differ.', null);
   });
 
   document.getElementById('clearBtn').addEventListener('click', ()=>{
     state.tubes = state.tubes.map(()=>[]);
-    history=[]; selected=null; renderBoard();
+    history=[]; visitedStates = new Set([hashState(state)]); selected=null; renderBoard();
   });
 
   document.getElementById('undoBtn').addEventListener('click', ()=>{
@@ -936,13 +952,13 @@ function wireEvents(){
   });
 
   document.getElementById('adviseBtn').addEventListener('click', ()=>{
-    if(mode!=='play'){ mode='play'; setModeButtons(); }
-    const result = advise(state, {depth:8, topN:3});
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+    const result = advise(state, {depth:8, topN:3, avoidStateHashes: visitedStates});
     renderAdvicePanel(result);
   });
 
   document.getElementById('solveBtn').addEventListener('click', ()=>{
-    if(mode!=='play'){ mode='play'; setModeButtons(); }
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
     setStatus('Thinking\u2026', null);
     setTimeout(()=>{
       const result = solve(state, {maxStates:150000});
