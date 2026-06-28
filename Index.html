@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#11141a">
+<title>Pourwise — Water Sort Engine</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  :root{
+    --bg:#11141a;
+    --surface:#1a1f28;
+    --surface-2:#222937;
+    --glass:#2a3140;
+    --line:#343c4d;
+    --text:#e9edf3;
+    --muted:#8b93a3;
+    --accent:#4fd1c5;
+    --accent-dim:#2b6b66;
+    --danger:#e2574c;
+    --gold:#e8b84b;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:'Inter',system-ui,sans-serif; height:100%; overflow-x:hidden;}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif; margin:0;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  button{font-family:inherit;}
+
+  #app{display:flex; flex-direction:column; min-height:100vh; max-width:560px; margin:0 auto;}
+
+  /* ---------- Header ---------- */
+  header{padding:18px 16px 10px; display:flex; align-items:baseline; justify-content:space-between;}
+  header .brand{display:flex; align-items:center; gap:8px;}
+  header .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px var(--accent);}
+  header h1{font-size:20px; letter-spacing:.2px;}
+  header .tagline{font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+
+  /* ---------- Mode bar ---------- */
+  .modebar{display:flex; gap:8px; padding:0 16px 12px;}
+  .modebar button{flex:1; padding:10px; border-radius:10px; border:1px solid var(--line);
+    background:var(--surface); color:var(--muted); font-weight:600; font-size:13px; cursor:pointer;
+    transition:.15s;}
+  .modebar button.active{background:var(--accent-dim); color:var(--accent); border-color:var(--accent);}
+
+  /* ---------- Setup row ---------- */
+  .setup{display:flex; gap:8px; padding:0 16px 14px; flex-wrap:wrap;}
+  .setup .field{display:flex; align-items:center; gap:6px; background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; padding:6px 10px;}
+  .setup .field label{font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+  .setup .field input{width:34px; background:none; border:none; color:var(--text); font-size:14px;
+    font-family:'JetBrains Mono',monospace; text-align:center;}
+  .setup .btn{padding:8px 12px; border-radius:10px; border:1px solid var(--line); background:var(--surface-2);
+    color:var(--text); font-size:12.5px; font-weight:600; cursor:pointer;}
+  .setup .btn.primary{background:var(--accent); color:#0b1715; border-color:var(--accent);}
+
+  /* ---------- Board ---------- */
+  #board{flex:0 0 auto; padding:6px 14px 12px; display:flex; flex-wrap:wrap; gap:14px 10px;
+    justify-content:center; align-content:flex-start;}
+  .tube-wrap{display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer;
+    user-select:none;}
+  .tube-idx{font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+  .tube{width:38px; height:140px; border:2px solid var(--line); border-radius:6px 6px 16px 16px;
+    background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
+    display:flex; flex-direction:column-reverse; padding:3px; gap:2px; position:relative;
+    transition:border-color .15s, box-shadow .15s;}
+  .tube.selected{border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,209,197,.18);}
+  .tube.illegal{animation:shake .25s;}
+  .tube.solved{border-color:var(--gold); box-shadow:0 0 12px rgba(232,184,75,.35);}
+  @keyframes shake{0%,100%{transform:translateX(0);}25%{transform:translateX(-4px);}75%{transform:translateX(4px);}}
+  .cell{flex:1; border-radius:3px; position:relative; transition:transform .18s;}
+  .cell.unknown{background:repeating-linear-gradient(45deg, #3a4150, #3a4150 4px, #2a3140 4px, #2a3140 8px);}
+  .cell::after{content:""; position:absolute; top:1px; left:2px; right:2px; height:30%;
+    background:rgba(255,255,255,.13); border-radius:2px;}
+  .empty-slot{flex:1;}
+
+  /* ---------- Palette ---------- */
+  #palette{padding:8px 14px 14px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;}
+  .swatch{width:32px; height:32px; border-radius:50%; border:2px solid transparent; cursor:pointer;
+    position:relative; transition:.12s;}
+  .swatch.picked{border-color:#fff; transform:scale(1.12);}
+  .swatch.unk{background:repeating-linear-gradient(45deg,#3a4150,#3a4150 4px,#222937 4px,#222937 8px);}
+
+  /* ---------- Action row ---------- */
+  .actions{display:flex; gap:8px; padding:0 14px 10px;}
+  .actions button{flex:1; padding:12px; border-radius:12px; border:none; font-weight:700; font-size:13.5px;
+    cursor:pointer;}
+  .actions .advise{background:var(--accent); color:#0b1715;}
+  .actions .solve{background:var(--surface-2); color:var(--text); border:1px solid var(--line);}
+  .actions .undo{background:var(--surface-2); color:var(--muted); border:1px solid var(--line); flex:0 0 70px;}
+
+  /* ---------- Panels ---------- */
+  #panel{padding:0 14px 24px;}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px;
+    margin-bottom:10px;}
+  .card .row1{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .stars{color:var(--gold); font-size:13px; letter-spacing:1px;}
+  .move-label{font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent);}
+  .confidence{font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+  .reasons{margin:6px 0 8px; padding-left:18px; font-size:12.5px; color:var(--muted); line-height:1.5;}
+  .card .do{width:100%; padding:8px; border-radius:8px; border:1px solid var(--accent-dim);
+    background:transparent; color:var(--accent); font-size:12px; font-weight:600; cursor:pointer;}
+  .status{font-size:12.5px; color:var(--muted); padding:6px 2px 10px; min-height:16px; line-height:1.5;}
+  .status.bad{color:var(--danger);}
+  .status.good{color:var(--accent);}
+  .solve-steps{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+  .solve-steps span{font-family:'JetBrains Mono',monospace; font-size:11.5px; background:var(--surface-2);
+    border:1px solid var(--line); border-radius:6px; padding:3px 7px; color:var(--text);}
+
+  /* ---------- Reveal sheet (bottom sheet, not a blocking modal — board stays visible) ---------- */
+  #modalBg{position:fixed; inset:0; background:transparent; display:none; align-items:flex-end;
+    justify-content:center; z-index:50; pointer-events:none;}
+  #modalBg.open{pointer-events:auto;}
+  #modal{background:var(--surface); border:1px solid var(--line); border-top-left-radius:18px;
+    border-top-right-radius:18px; padding:16px 18px 22px; width:100%; max-width:560px; text-align:center;
+    box-shadow:0 -8px 30px rgba(0,0,0,.45); animation:sheetUp .18s ease-out;}
+  @keyframes sheetUp{from{transform:translateY(100%);} to{transform:translateY(0);}}
+  #modal h3{font-size:14px; margin-bottom:4px;}
+  #modal p{font-size:12px; color:var(--muted); margin:0 0 12px;}
+  #modal .swatches{display:flex; flex-wrap:wrap; gap:8px; justify-content:center;}
+  .tube.revealing{border-color:var(--gold) !important; box-shadow:0 0 14px rgba(232,184,75,.5);
+    animation:revealPulse 1.1s ease-in-out infinite;}
+  @keyframes revealPulse{0%,100%{box-shadow:0 0 8px rgba(232,184,75,.35);} 50%{box-shadow:0 0 18px rgba(232,184,75,.7);}}
+
+  footer{margin-top:auto; padding:14px; text-align:center; font-size:10.5px; color:var(--muted);
+    font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><div class="dot"></div><h1>Pourwise</h1></div>
+    <div class="tagline">water sort engine</div>
+  </header>
+
+  <div class="modebar">
+    <button id="modeBuildBtn" class="active">Build</button>
+    <button id="modePlayBtn">Play</button>
+    <button id="modeScanBtn">Scan</button>
+  </div>
+
+  <div id="scanSection" style="display:none; padding:0 14px 12px;">
+    <div class="card" id="scanCard">
+      <div id="scanStep1">
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">Upload a screenshot of your puzzle. You'll mark the background once, then tap two corners per row — rows can have different tube counts.</p>
+        <p style="font-size:12px;color:var(--gold);margin:0 0 10px; font-weight:600;">⚠ Set CAP (capacity) in the toolbar below to match your puzzle's tube height before uploading — it controls how the grid is sliced.</p>
+        <input type="file" id="scanFileInput" accept="image/*" style="margin-bottom:10px; font-size:12px; color:var(--muted);">
+        <div class="field"><label>ROWS</label><input id="scanRows" type="number" min="1" max="6" value="2"></div>
+      </div>
+      <div id="scanCalibArea" style="display:none;">
+        <p id="scanInstruction" style="font-size:12.5px;color:var(--accent);margin:10px 0 8px; font-weight:600;"></p>
+        <div id="scanColsRowField" class="field" style="display:none; margin-bottom:8px; width:fit-content;">
+          <label>TUBES IN THIS ROW</label><input id="scanColsRow" type="number" min="1" max="16" value="7">
+        </div>
+        <div style="overflow:auto; max-width:100%; border:1px solid var(--line); border-radius:10px;">
+          <canvas id="scanCanvas" style="display:block; max-width:100%; touch-action:none; cursor:crosshair;"></canvas>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button class="btn" id="scanResetBtn">Reset taps</button>
+          <button class="btn primary" id="scanBuildBtn" style="display:none;">Build Board From Scan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="setup">
+    <div class="field"><label>CAP</label><input id="capInput" type="number" min="2" max="8" value="4"></div>
+    <div class="field"><label>TUBES</label><input id="tubeCountInput" type="number" min="2" max="16" value="6"></div>
+    <button class="btn primary" id="newBoardBtn">New Board</button>
+    <button class="btn" id="dupBtn">Duplicate Last</button>
+    <button class="btn" id="clearBtn">Clear</button>
+  </div>
+
+  <div id="board"></div>
+
+  <div id="palette"></div>
+
+  <div class="actions">
+    <button class="undo" id="undoBtn">Undo</button>
+    <button class="advise" id="adviseBtn">Get Advice</button>
+    <button class="solve" id="solveBtn">Solve</button>
+  </div>
+
+  <div id="panel"></div>
+
+  <footer>capacity-aware · loop-safe · hidden-color tracking</footer>
+</div>
+
+<div id="modalBg">
+  <div id="modal">
+    <h3>What color was revealed?</h3>
+    <p>You poured past a hidden cell. Check your screen and tap the color that's now showing.</p>
+    <div class="swatches" id="modalSwatches"></div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   ENGINE  (pure logic — bottom-of-array = bottom of tube, top = pourable end)
+   ========================================================================= */
+const UNKNOWN = 'unknown';
+
+function cloneState(s){ return { tubes: s.tubes.map(t=>t.slice()), capacity: s.capacity }; }
+function topColor(t){ return t.length===0 ? null : t[t.length-1]; }
+function topRunLength(t){
+  if(t.length===0) return 0;
+  const c=t[t.length-1]; if(c===UNKNOWN) return 0;
+  let n=0; for(let i=t.length-1;i>=0;i--){ if(t[i]===c) n++; else break; } return n;
+}
+function isTubeEmpty(t){ return t.length===0; }
+function isTubeSolved(t,cap){ if(t.length!==cap) return false; const c=t[0]; if(c===UNKNOWN) return false; return t.every(x=>x===c); }
+function isTubeKnownUniform(t){ if(t.length===0) return true; const c=t[0]; if(c===UNKNOWN) return false; return t.every(x=>x===c); }
+
+function checkMove(state, from, to){
+  if(from===to) return null;
+  const src=state.tubes[from], dst=state.tubes[to];
+  if(!src||!dst||src.length===0) return null;
+  const srcTop=topColor(src);
+  if(srcTop===UNKNOWN) return null;
+  const space=state.capacity-dst.length;
+  if(space<=0) return null;
+  if(dst.length>0){ const dstTop=topColor(dst); if(dstTop===UNKNOWN||dstTop!==srcTop) return null; }
+  const run=topRunLength(src);
+  const amount=Math.min(run,space);
+  if(amount<=0) return null;
+  const newSrcLen=src.length-amount;
+  const revealsUnknown = newSrcLen>0 && src[newSrcLen-1]===UNKNOWN;
+  return { amount, revealsUnknown, srcTop };
+}
+function applyMove(state, from, to){
+  const info=checkMove(state,from,to);
+  if(!info) throw new Error('illegal move');
+  const next=cloneState(state);
+  const src=next.tubes[from], dst=next.tubes[to];
+  for(let i=0;i<info.amount;i++) dst.push(src.pop());
+  return { state:next, info };
+}
+function legalMoves(state){
+  const moves=[];
+  for(let i=0;i<state.tubes.length;i++) for(let j=0;j<state.tubes.length;j++){
+    if(i===j) continue;
+    const info=checkMove(state,i,j);
+    if(info) moves.push({from:i,to:j,...info});
+  }
+  return moves;
+}
+function isSolved(state){ return state.tubes.every(t=>t.length===0||isTubeSolved(t,state.capacity)); }
+function hashState(state){ return state.tubes.map(t=>t.join(',')).sort().join('|'); }
+
+/* =========================================================================
+   SCREENSHOT READER (Phase 5) — hardened version
+   Calibration: 1 background tap (anywhere off-tube) establishes a reference color, then
+   2 taps per row (top-left of slot 1, bottom-right of the last slot) define that row's
+   rectangle — rows can have different tube counts (ragged grids).
+   Classification is RELATIVE to the measured background, not fixed magic numbers, so it
+   should generalize across light/dark skins and tinted backgrounds: a cell whose saturation
+   is well above the background's is a real color; otherwise if its brightness differs
+   meaningfully from the background (in EITHER direction — glyphs can be lighter or darker
+   than their background depending on skin) it's a hidden '?'; otherwise it's empty.
+   ========================================================================= */
+let scanImg = null;
+let scanRowsNeeded = 2;
+let scanCurrentRow = 0;
+let scanTapBuffer = [];      // points collected for the step in progress
+let scanRowRects = [];       // {x0,y0,x1,y1} per completed row, in natural image pixel coords
+let scanRowCols = [];        // tube count per completed row (ragged grids supported)
+let scanCtx = null;
+let scanBgRGB = null;        // background reference sample
+let scanPhase = 'bg';        // 'bg' -> 'row'
+
+function rgbToHex(r,g,b){ return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join(''); }
+function colorDistance(a,b){ return Math.sqrt((a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2); }
+
+// Plain box-mean sample. (Tried a trimmed mean for noise-resistance, but the '?' glyph often
+// covers under 15% of the sample box -- trimming the brightest 15% per side was discarding the
+// very glyph pixels that signal a hidden cell, turning real unknowns into false empties. A wide
+// box averaged over thousands of pixels already cancels JPEG noise without needing trimming.)
+function sampleBoxAvg(ctx, cx, cy, half){
+  half = half || 12;
+  const x0 = Math.max(0, Math.round(cx-half)), y0 = Math.max(0, Math.round(cy-half));
+  const w = Math.min(ctx.canvas.width-x0, half*2), h = Math.min(ctx.canvas.height-y0, half*2);
+  if(w<=0||h<=0) return [0,0,0];
+  const data = ctx.getImageData(x0,y0,w,h).data;
+  let r=0,g=0,b=0,n=0;
+  for(let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++; }
+  if(n===0) return [0,0,0];
+  return [r/n, g/n, b/n];
+}
+
+function classifyCellRelative(rgb, bgRgb){
+  const [r,g,b] = rgb;
+  const satCell = Math.max(r,g,b) - Math.min(r,g,b);
+  const satBg = bgRgb ? Math.max(bgRgb[0],bgRgb[1],bgRgb[2]) - Math.min(bgRgb[0],bgRgb[1],bgRgb[2]) : 0;
+  if (satCell - satBg > 18) return { type:'color', hex: rgbToHex(r,g,b) };
+  const brightness = (r+g+b)/3;
+  const bgBrightness = bgRgb ? (bgRgb[0]+bgRgb[1]+bgRgb[2])/3 : 39;
+  // Threshold of 16 chosen from measured data: genuinely empty cells stay within ~12 of the
+  // background reference; even a thin/modest glyph lifts brightness by ~22+. 16 sits in the gap.
+  if (Math.abs(brightness - bgBrightness) > 16) return { type:'unknown' };
+  return { type:'empty' };
+}
+
+// Discovered colors get clustered (so the same liquid sampled in two tubes maps to one id)
+// and registered into the global COLORS palette so they render correctly afterward.
+let discoveredClusters = []; // {rgb, id}
+let discoveredCounter = 0;
+function resetDiscoveredColorTracking(){
+  discoveredClusters = [];
+  let maxN = 0;
+  COLORS.forEach(c=>{
+    const m = /^scan(\d+)$/.exec(c.id);
+    if(m) maxN = Math.max(maxN, parseInt(m[1]));
+  });
+  discoveredCounter = maxN;
+}
+function registerDiscoveredColor(rgb){
+  for(const cl of discoveredClusters){
+    if(colorDistance(cl.rgb, rgb) < 30) return cl.id;
+  }
+  discoveredCounter++;
+  const id = 'scan'+discoveredCounter;
+  const hex = rgbToHex(rgb[0],rgb[1],rgb[2]);
+  discoveredClusters.push({ rgb, id });
+  COLORS.push({ id, hex, name: 'Scanned '+discoveredCounter });
+  return id;
+}
+
+function setupScanCanvasForImage(img){
+  const canvas = document.getElementById('scanCanvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  scanCtx = canvas.getContext('2d');
+  scanCtx.drawImage(img, 0, 0);
+}
+
+function scanCanvasPointFromEvent(evt){
+  const canvas = document.getElementById('scanCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+  const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+  return { x:(clientX-rect.left)*scaleX, y:(clientY-rect.top)*scaleY };
+}
+
+function redrawScanOverlay(){
+  if(!scanImg) return;
+  scanCtx.drawImage(scanImg, 0, 0);
+  scanCtx.strokeStyle = '#4fd1c5'; scanCtx.lineWidth = 3;
+  scanRowRects.forEach(r=>{
+    scanCtx.strokeRect(r.x0, r.y0, r.x1-r.x0, r.y1-r.y0);
+  });
+  if(scanBgRGB){
+    scanCtx.fillStyle = '#e8b84b';
+  }
+  scanTapBuffer.forEach(p=>{
+    scanCtx.beginPath(); scanCtx.arc(p.x, p.y, 8, 0, Math.PI*2);
+    scanCtx.fillStyle = '#4fd1c5'; scanCtx.fill();
+  });
+}
+
+function updateScanInstruction(){
+  const el = document.getElementById('scanInstruction');
+  const colsField = document.getElementById('scanColsRowField');
+  if(scanPhase==='bg'){
+    colsField.style.display = 'none';
+    el.textContent = 'Tap an empty patch of background — not on any tube — so the engine can calibrate.';
+    return;
+  }
+  if(scanCurrentRow >= scanRowsNeeded){
+    colsField.style.display = 'none';
+    el.textContent = 'All rows calibrated — review the overlay, then build the board.';
+    document.getElementById('scanBuildBtn').style.display = 'block';
+    return;
+  }
+  colsField.style.display = (scanTapBuffer.length===0) ? 'block' : 'none';
+  const which = scanTapBuffer.length===0 ? 'top-left corner of slot 1 (tube 1)' : 'bottom-right corner of the last slot (last tube in this row)';
+  el.textContent = `Row ${scanCurrentRow+1} of ${scanRowsNeeded}: tap the ${which}.`;
+}
+
+function onScanCanvasClick(evt){
+  evt.preventDefault();
+  const p = scanCanvasPointFromEvent(evt);
+
+  if(scanPhase==='bg'){
+    scanBgRGB = sampleBoxAvg(scanCtx, p.x, p.y, 14);
+    scanPhase = 'row';
+    redrawScanOverlay();
+    updateScanInstruction();
+    return;
+  }
+
+  if(scanCurrentRow >= scanRowsNeeded) return;
+  scanTapBuffer.push(p);
+  if(scanTapBuffer.length===2){
+    const [a,b] = scanTapBuffer;
+    scanRowRects.push({ x0:Math.min(a.x,b.x), y0:Math.min(a.y,b.y), x1:Math.max(a.x,b.x), y1:Math.max(a.y,b.y) });
+    const colsForRow = Math.max(1, Math.min(16, parseInt(document.getElementById('scanColsRow').value)||7));
+    scanRowCols.push(colsForRow);
+    scanTapBuffer = [];
+    scanCurrentRow++;
+  }
+  redrawScanOverlay();
+  updateScanInstruction();
+}
+
+function buildBoardFromScan(){
+  const capacity = Math.max(2, Math.min(8, parseInt(document.getElementById('capInput').value)||4));
+  const tubesOut = [];
+  scanRowRects.forEach((rect, rIdx)=>{
+    const cols = scanRowCols[rIdx];
+    const colWidth = (rect.x1-rect.x0)/cols;
+    const cellHeight = (rect.y1-rect.y0)/capacity;
+    for(let c=0;c<cols;c++){
+      const cx = rect.x0 + colWidth*(c+0.5);
+      const displayTopToBottom = [];
+      for(let slot=0; slot<capacity; slot++){
+        const cy = rect.y0 + cellHeight*(slot+0.5);
+        const avg = sampleBoxAvg(scanCtx, cx, cy, Math.max(6, Math.min(colWidth,cellHeight)*0.35));
+        const cls = classifyCellRelative(avg, scanBgRGB);
+        if(cls.type==='color') displayTopToBottom.push({kind:'color', id: registerDiscoveredColor([avg[0],avg[1],avg[2]])});
+        else if(cls.type==='unknown') displayTopToBottom.push({kind:'unknown'});
+        else displayTopToBottom.push({kind:'empty'});
+      }
+      // strip any leading empty entries (top of tube), then reverse remaining into bottom-up storage
+      let i=0; while(i<displayTopToBottom.length && displayTopToBottom[i].kind==='empty') i++;
+      const filled = displayTopToBottom.slice(i).map(c => c.kind==='unknown' ? UNKNOWN : c.id);
+      tubesOut.push(filled.reverse());
+    }
+  });
+  state = { capacity, tubes: tubesOut };
+  document.getElementById('capInput').value = capacity;
+  document.getElementById('tubeCountInput').value = tubesOut.length;
+  mode = 'build';
+  setModeButtons();
+  buildPalette();
+  setStatus(`Read ${tubesOut.length} tubes from the screenshot — check each one and fix anything that looks off.`, null);
+}
+
+function resetScanCalibration(){
+  scanPhase = 'bg'; scanBgRGB = null;
+  scanCurrentRow = 0; scanTapBuffer = []; scanRowRects = []; scanRowCols = [];
+  document.getElementById('scanBuildBtn').style.display = 'none';
+  if(scanImg) redrawScanOverlay();
+  updateScanInstruction();
+}
+
+function initScanUI(){
+  document.getElementById('scanFileInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        scanImg = img;
+        scanRowsNeeded = Math.max(1, Math.min(6, parseInt(document.getElementById('scanRows').value)||2));
+        resetDiscoveredColorTracking();
+        document.getElementById('scanStep1').style.display = 'none';
+        document.getElementById('scanCalibArea').style.display = 'block';
+        setupScanCanvasForImage(img);
+        resetScanCalibration();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  const canvas = document.getElementById('scanCanvas');
+  canvas.addEventListener('click', onScanCanvasClick);
+  document.getElementById('scanResetBtn').addEventListener('click', resetScanCalibration);
+  document.getElementById('scanBuildBtn').addEventListener('click', buildBoardFromScan);
+}
+
+/* =========================================================================
+   SOLVER / ADVISOR
+   ========================================================================= */
+function trappedPenalty(state){
+  const moves=legalMoves(state);
+  const movableFrom=new Set(moves.map(m=>m.from));
+  let penalty=0;
+  state.tubes.forEach((tube,idx)=>{
+    if(tube.length===0) return;
+    const run=topRunLength(tube);
+    const buriedLen=tube.length-run;
+    if(buriedLen>0){ let base=buriedLen*6; if(!movableFrom.has(idx)) base*=2; penalty+=base; }
+  });
+  return penalty;
+}
+function evaluate(state){
+  let score=0; const colorTubeCount={}; let emptyTubes=0;
+  for(const tube of state.tubes){
+    if(tube.length===0){ emptyTubes++; continue; }
+    if(isTubeSolved(tube,state.capacity)) score+=1000;
+    else if(isTubeKnownUniform(tube)) score+=tube.length*tube.length*8;
+    else { const run=topRunLength(tube); score+=run*run*4; }
+    const seen=new Set();
+    for(const c of tube){ if(c===UNKNOWN) continue; if(!seen.has(c)){ seen.add(c); colorTubeCount[c]=(colorTubeCount[c]||0)+1; } }
+  }
+  score+=emptyTubes*40;
+  for(const c in colorTubeCount){ const n=colorTubeCount[c]; if(n>1) score-=(n-1)*15; }
+  score-=trappedPenalty(state);
+  return score;
+}
+function usefulMoves(state){
+  return legalMoves(state).filter(m=>{
+    const src=state.tubes[m.from], dst=state.tubes[m.to];
+    return !(dst.length===0 && m.amount===src.length);
+  });
+}
+function solve(initialState, opts){
+  opts = opts || {};
+  const maxStates = opts.maxStates || 150000, maxDepth = opts.maxDepth || 200;
+  const visited=new Set([hashState(initialState)]);
+  let frontier=[{state:initialState, path:[]}];
+  let statesExplored=0;
+  for(let depth=0; depth<maxDepth && frontier.length>0; depth++){
+    const next=[];
+    for(const node of frontier){
+      if(isSolved(node.state)) return {success:true, moves:node.path, statesExplored, exhausted:false};
+      for(const m of usefulMoves(node.state)){
+        const {state:ns}=applyMove(node.state,m.from,m.to);
+        const h=hashState(ns);
+        if(visited.has(h)) continue;
+        visited.add(h); statesExplored++;
+        if(statesExplored>maxStates) return {success:false, moves:null, statesExplored, exhausted:true};
+        next.push({state:ns, path:[...node.path,{from:m.from,to:m.to,amount:m.amount,revealsUnknown:m.revealsUnknown}]});
+      }
+    }
+    frontier=next;
+  }
+  return {success:false, moves:null, statesExplored, exhausted:false};
+}
+// Beam search: keeps the top `width` candidate states per ply instead of one greedy path,
+// so a locally-second-best move that opens a better line isn't lost.
+function beamLookahead(state, depth, width){
+  width = width || 3;
+  let beam=[{state, visited:new Set([hashState(state)]), evalSoFar:evaluate(state)}];
+  let bestEval=evaluate(state);
+  for(let ply=0; ply<depth; ply++){
+    const candidates=[];
+    for(const node of beam){
+      if(isSolved(node.state)) return {bestEval:100000, solved:true, pliesToSolve:ply};
+      for(const m of usefulMoves(node.state)){
+        const {state:ns}=applyMove(node.state,m.from,m.to);
+        const h=hashState(ns);
+        if(node.visited.has(h)) continue;
+        const sc=evaluate(ns);
+        const visited=new Set(node.visited); visited.add(h);
+        candidates.push({state:ns, visited, evalSoFar:sc});
+      }
+    }
+    if(candidates.length===0) break;
+    candidates.sort((a,b)=>b.evalSoFar-a.evalSoFar);
+    beam=candidates.slice(0,width);
+    bestEval=Math.max(bestEval, beam[0].evalSoFar);
+  }
+  const solvedNode=beam.find(n=>isSolved(n.state));
+  return {bestEval, solved: !!solvedNode, pliesToSolve: solvedNode ? depth : null};
+}
+// Monte Carlo confidence: simulate several eval-biased rollouts, report the fraction that
+// reach a fully solved board within a move budget. Used as a *bonus* signal, not the primary one
+// (a hard puzzle can have a genuinely great move that still doesn't fully resolve within budget).
+function rolloutOnce(state, maxSteps, rng){
+  let current=state; const visited=new Set([hashState(current)]);
+  for(let i=0;i<maxSteps;i++){
+    if(isSolved(current)) return true;
+    const moves=usefulMoves(current);
+    if(moves.length===0) return false;
+    const scored=moves.map(m=>{
+      const {state:ns}=applyMove(current,m.from,m.to);
+      const h=hashState(ns);
+      return {ns, h, sc: visited.has(h) ? -Infinity : evaluate(ns)};
+    }).filter(x=>x.sc>-Infinity);
+    if(scored.length===0) return false;
+    scored.sort((a,b)=>b.sc-a.sc);
+    const poolSize=Math.min(2, scored.length);
+    const pick=scored[Math.floor(rng()*poolSize)];
+    visited.add(pick.h); current=pick.ns;
+  }
+  return isSolved(current);
+}
+function monteCarloConfidence(state, opts){
+  opts=opts||{}; const rollouts=opts.rollouts||12, maxSteps=opts.maxSteps||40, seed=opts.seed||1;
+  let s=seed; const rng=()=>{ s=(s*9301+49297)%233280; return s/233280; };
+  let wins=0;
+  for(let i=0;i<rollouts;i++) if(rolloutOnce(state, maxSteps, rng)) wins++;
+  return wins/rollouts;
+}
+function lookahead(state, depth){ return beamLookahead(state, depth, 3); }
+function advise(state, opts){
+  opts=opts||{}; const depth=opts.depth||8, topN=opts.topN||3, rollouts=opts.rollouts||10;
+  const avoidStateHashes = opts.avoidStateHashes || null;
+  let moves=usefulMoves(state);
+  if(avoidStateHashes && avoidStateHashes.size){
+    moves = moves.filter(m=>{
+      const {state:ns} = applyMove(state, m.from, m.to);
+      return !avoidStateHashes.has(hashState(ns));
+    });
+  }
+  const results=[]; const baseline=evaluate(state);
+  const baselineTrapped=trappedPenalty(state);
+  for(const m of moves){
+    const before=state;
+    const {state:after, info}=applyMove(state,m.from,m.to);
+    const reasons=[];
+    if(isTubeSolved(after.tubes[m.to], after.capacity)) reasons.push('Completes a tube');
+    const beforeRun=topRunLength(before.tubes[m.to]);
+    const afterUniformLen=isTubeKnownUniform(after.tubes[m.to]) ? after.tubes[m.to].length : 0;
+    if(afterUniformLen>=3 && afterUniformLen>beforeRun) reasons.push(`Builds a ${afterUniformLen}-of-a-kind stack`);
+    if(info.revealsUnknown) reasons.push('Reveals a hidden color');
+    if(before.tubes[m.to].length===0) reasons.push('Moves into an empty tube (keeps options open)');
+    if(isTubeEmpty(after.tubes[m.from]) && before.tubes[m.from].length>0) reasons.push('Frees up an empty tube');
+    if(trappedPenalty(after) < baselineTrapped) reasons.push('Frees a color that was trapped underneath another');
+    const {bestEval, solved, pliesToSolve}=beamLookahead(after, depth, 3);
+    const gain=bestEval-baseline;
+    const confidence01=monteCarloConfidence(after, {rollouts, maxSteps:40, seed:(m.from+1)*31+(m.to+1)*7});
+    if(confidence01>=0.5 && !solved) reasons.push('Simulated playouts solve the puzzle from here');
+    if(reasons.length===0) reasons.push('Improves future options');
+    results.push({from:m.from, to:m.to, amount:m.amount, reasons, solvesWithinLookahead:solved, pliesToSolve, evalGain:gain, confidence01});
+  }
+  results.sort((a,b)=> (b.solvesWithinLookahead-a.solvesWithinLookahead) || (b.confidence01-a.confidence01) || (b.evalGain-a.evalGain) );
+  const gains=results.map(r=>r.evalGain);
+  const maxGain=Math.max(1,...gains), minGain=Math.min(0,...gains);
+  const range=Math.max(1, maxGain-minGain);
+  return results.slice(0,topN).map(r=>{
+    const norm=(r.evalGain-minGain)/range;
+    let stars=Math.max(1,Math.min(5,Math.round(1+norm*4)));
+    let confidence=Math.round(35+norm*45+r.confidence01*15);
+    if(r.solvesWithinLookahead){ stars=5; confidence=Math.max(confidence,92); }
+    confidence=Math.max(5,Math.min(99,confidence));
+    return {from:r.from, to:r.to, amount:r.amount, reasons:r.reasons, stars, confidence, pliesToSolve:r.pliesToSolve};
+  });
+}
+
+/* =========================================================================
+   UI LAYER
+   ========================================================================= */
+const COLORS = [
+  {id:'red', hex:'#e2574c', name:'Red'},
+  {id:'orange', hex:'#e8893f', name:'Orange'},
+  {id:'gold', hex:'#e8b84b', name:'Gold'},
+  {id:'yellow', hex:'#e6da4a', name:'Yellow'},
+  {id:'lime', hex:'#9fd64a', name:'Lime'},
+  {id:'green', hex:'#3fae5e', name:'Green'},
+  {id:'teal', hex:'#4fd1c5', name:'Teal'},
+  {id:'blue', hex:'#4a8de8', name:'Blue'},
+  {id:'navy', hex:'#3b4e9e', name:'Navy'},
+  {id:'purple', hex:'#9a5fd6', name:'Purple'},
+  {id:'pink', hex:'#e26aa8', name:'Pink'},
+  {id:'gray', hex:'#9aa3b2', name:'Gray'},
+  {id:'brown', hex:'#8a5a3c', name:'Brown'},
+];
+const colorHex = id => id===UNKNOWN ? null : (COLORS.find(c=>c.id===id)||{}).hex;
+
+let mode = 'build';          // 'build' | 'play'
+let state = null;            // {capacity, tubes}
+let buildPaint = COLORS[0].id; // currently selected paint in build mode
+let selected = null;          // selected tube index in play mode
+let history = [];             // for undo, stack of previous states
+let visitedStates = new Set(); // hashes of every state seen this play session, for loop detection
+let pendingReveal = null;     // {tubeIndex} awaiting modal input
+let lastSolve = null;
+
+function freshTubes(count, cap){ return Array.from({length:count}, ()=>[]); }
+
+function init(){
+  state = { capacity: 4, tubes: freshTubes(6, 4) };
+  visitedStates = new Set([hashState(state)]);
+  renderAll();
+  buildPalette();
+  wireEvents();
+  mergeSavedCustomColors().then(()=> buildPalette());
+}
+
+function buildPalette(){
+  const pal = document.getElementById('palette');
+  pal.innerHTML = '';
+  COLORS.forEach(c=>{
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (buildPaint===c.id ? ' picked':'');
+    sw.style.background = c.hex;
+    sw.title = c.name;
+    sw.addEventListener('click', ()=>{ buildPaint=c.id; buildPalette(); });
+    pal.appendChild(sw);
+  });
+  const unk = document.createElement('div');
+  unk.className = 'swatch unk' + (buildPaint===UNKNOWN ? ' picked':'');
+  unk.title = 'Unknown / hidden';
+  unk.addEventListener('click', ()=>{ buildPaint=UNKNOWN; buildPalette(); });
+  pal.appendChild(unk);
+  pal.style.display = (mode==='build') ? 'flex' : 'none';
+}
+
+function renderBoard(){
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  state.tubes.forEach((tube, idx)=>{
+    const wrap = document.createElement('div'); wrap.className='tube-wrap';
+    const label = document.createElement('div'); label.className='tube-idx'; label.textContent = '#'+(idx+1);
+    const tubeEl = document.createElement('div'); tubeEl.className='tube';
+    if(selected===idx) tubeEl.classList.add('selected');
+    if(isTubeSolved(tube, state.capacity)) tubeEl.classList.add('solved');
+    if(pendingReveal && pendingReveal.tubeIndex===idx) tubeEl.classList.add('revealing');
+
+    for(let slot=0; slot<state.capacity; slot++){
+      const cell = document.createElement('div');
+      if(slot < tube.length){
+        const colorId = tube[slot];
+        cell.className = 'cell' + (colorId===UNKNOWN ? ' unknown':'');
+        if(colorId!==UNKNOWN) cell.style.background = colorHex(colorId);
+      } else {
+        cell.className = 'empty-slot';
+      }
+      tubeEl.appendChild(cell);
+    }
+    tubeEl.addEventListener('click', ()=> onTubeClick(idx));
+    wrap.appendChild(tubeEl); wrap.appendChild(label);
+    board.appendChild(wrap);
+  });
+}
+
+function flashIllegal(idx){
+  const tubes = document.querySelectorAll('.tube');
+  const el = tubes[idx];
+  if(!el) return;
+  el.classList.add('illegal');
+  setTimeout(()=>el.classList.remove('illegal'), 260);
+}
+
+function setStatus(msg, kind){
+  const panel = document.getElementById('panel');
+  let s = document.getElementById('statusLine');
+  if(!s){ s = document.createElement('div'); s.id='statusLine'; s.className='status'; panel.prepend(s); }
+  s.className = 'status' + (kind ? ' '+kind : '');
+  s.textContent = msg;
+}
+
+function onTubeClick(idx){
+  if(mode==='build'){
+    buildClick(idx);
+    return;
+  }
+  // play mode
+  if(pendingReveal) return; // must resolve modal first
+  if(selected===null){
+    if(state.tubes[idx].length===0){ return; }
+    selected = idx; renderBoard(); return;
+  }
+  if(selected===idx){ selected=null; renderBoard(); return; }
+  const info = checkMove(state, selected, idx);
+  if(!info){
+    flashIllegal(idx); flashIllegal(selected);
+    setStatus('That move isn\u2019t legal \u2014 colors don\u2019t match or the tube is full.', 'bad');
+    selected=null; renderBoard(); return;
+  }
+  history.push(cloneState(state));
+  const {state:next} = applyMove(state, selected, idx);
+  state = next;
+  visitedStates.add(hashState(state));
+  const fromIdx = selected;
+  selected = null;
+  renderBoard();
+  if(info.revealsUnknown){
+    pendingReveal = { tubeIndex: fromIdx };
+    openRevealModal(fromIdx);
+  } else {
+    setStatus(isSolved(state) ? 'Solved! \u2728' : 'Move applied.', isSolved(state)?'good':null);
+  }
+  saveLastPuzzleSnapshot();
+}
+
+function buildClick(idx){
+  const tube = state.tubes[idx];
+  // left-click-ish single click cycles: fill next empty slot from bottom with current paint,
+  // or if tube is full, clicking removes the top slot (so you can correct mistakes quickly).
+  if(tube.length < state.capacity){
+    tube.push(buildPaint);
+  } else {
+    tube.pop();
+  }
+  renderBoard();
+}
+
+function openRevealModal(tubeIndex){
+  const bg = document.getElementById('modalBg');
+  const sw = document.getElementById('modalSwatches');
+  sw.innerHTML = '';
+  COLORS.forEach(c=>{
+    const el = document.createElement('div');
+    el.className = 'swatch'; el.style.background = c.hex; el.title = c.name;
+    el.addEventListener('click', ()=>{
+      const tube = state.tubes[tubeIndex];
+      // find the topmost remaining 'unknown' cell and reveal it
+      for(let i=tube.length-1;i>=0;i--){ if(tube[i]===UNKNOWN){ tube[i]=c.id; break; } }
+      pendingReveal = null;
+      bg.style.display='none';
+      bg.classList.remove('open');
+      renderBoard();
+      setStatus('Updated hidden color \u2014 continue playing.', null);
+      saveLastPuzzleSnapshot();
+    });
+    sw.appendChild(el);
+  });
+  bg.style.display = 'flex';
+  bg.classList.add('open');
+  renderBoard(); // so the revealing-tube highlight shows immediately, even though the sheet covers the bottom
+}
+
+function renderAdvicePanel(adviceList){
+  const panel = document.getElementById('panel');
+  // keep status line, clear rest
+  const status = document.getElementById('statusLine');
+  panel.innerHTML = '';
+  if(status) panel.appendChild(status);
+  if(!adviceList || adviceList.length===0){
+    const anyMovesAtAll = usefulMoves(state).length > 0;
+    if(anyMovesAtAll){
+      setStatus('Every remaining move would repeat a position already tried this session \u2014 try Undo, or Solve for a full plan.', 'bad');
+    } else {
+      setStatus('No legal moves available from this position.', 'bad');
+    }
+    return;
+  }
+  adviceList.forEach(a=>{
+    const card = document.createElement('div'); card.className='card';
+    const row1 = document.createElement('div'); row1.className='row1';
+    const label = document.createElement('div'); label.className='move-label'; label.textContent = `#${a.from+1} \u2192 #${a.to+1}`;
+    const stars = document.createElement('div'); stars.className='stars'; stars.textContent = '\u2605'.repeat(a.stars) + '\u2606'.repeat(5-a.stars);
+    row1.appendChild(label); row1.appendChild(stars);
+    const reasons = document.createElement('ul'); reasons.className='reasons';
+    a.reasons.forEach(r=>{ const li=document.createElement('li'); li.textContent=r; reasons.appendChild(li); });
+    if(a.pliesToSolve!=null){ const li=document.createElement('li'); li.textContent=`Engine sees a full solve within ${a.pliesToSolve} more moves`; reasons.appendChild(li); }
+    const conf = document.createElement('div'); conf.className='confidence'; conf.textContent = `confidence ${a.confidence}%`;
+    const doBtn = document.createElement('button'); doBtn.className='do'; doBtn.textContent='Play this move';
+    doBtn.addEventListener('click', ()=>{
+      if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+      history.push(cloneState(state));
+      const {state:next, info} = applyMove(state, a.from, a.to);
+      state = next; visitedStates.add(hashState(state)); renderBoard();
+      if(info.revealsUnknown){ pendingReveal={tubeIndex:a.from}; openRevealModal(a.from); }
+      else setStatus(isSolved(state)?'Solved! \u2728':'Move applied.', isSolved(state)?'good':null);
+      saveLastPuzzleSnapshot();
+    });
+    card.appendChild(row1); card.appendChild(reasons); card.appendChild(conf); card.appendChild(doBtn);
+    panel.appendChild(card);
+  });
+}
+
+function renderSolvePanel(result){
+  const panel = document.getElementById('panel');
+  const status = document.getElementById('statusLine');
+  panel.innerHTML=''; if(status) panel.appendChild(status);
+  const card = document.createElement('div'); card.className='card';
+  if(result.success){
+    setStatus(`Solution found \u2014 ${result.moves.length} moves.`, 'good');
+    const steps = document.createElement('div'); steps.className='solve-steps';
+    result.moves.forEach((m,i)=>{
+      const s=document.createElement('span'); s.textContent=`${i+1}. #${m.from+1}\u2192#${m.to+1}${m.revealsUnknown?' \u26a0':''}`;
+      steps.appendChild(s);
+    });
+    card.appendChild(steps);
+    const note = document.createElement('div'); note.className='reasons'; note.style.marginTop='8px';
+    note.innerHTML = '<li>\u26a0 marks a move that will reveal a hidden cell \u2014 the plan may need a re-solve after you update that color.</li>';
+    card.appendChild(note);
+  } else if(result.exhausted){
+    setStatus('Search budget exceeded \u2014 board may be very large or unsolvable as known. Try Advisor for a step-by-step instead.', 'bad');
+  } else {
+    setStatus('No solution found with current information \u2014 likely blocked by an unrevealed hidden color, or the board has no path to a solve.', 'bad');
+  }
+  panel.appendChild(card);
+}
+
+function setModeButtons(){
+  document.getElementById('modeBuildBtn').classList.toggle('active', mode==='build');
+  document.getElementById('modePlayBtn').classList.toggle('active', mode==='play');
+  document.getElementById('modeScanBtn').classList.toggle('active', mode==='scan');
+  document.getElementById('scanSection').style.display = (mode==='scan') ? 'block' : 'none';
+  document.getElementById('board').style.display = (mode==='scan') ? 'none' : 'flex';
+  document.getElementById('palette').style.display = (mode==='build') ? 'flex' : 'none';
+  buildPalette();
+  selected = null;
+  if(mode!=='scan') renderBoard();
+}
+
+function renderAll(){ renderBoard(); }
+
+/* ---------- persistence (window.storage, not localStorage) ---------- */
+async function saveLastPuzzleSnapshot(){
+  try{
+    await window.storage.set('lastPuzzle', JSON.stringify({capacity:state.capacity, tubes: state.tubes}), false);
+    const customColors = COLORS.filter(c => c.id.startsWith('scan'));
+    if(customColors.length) await window.storage.set('lastPuzzleColors', JSON.stringify(customColors), false);
+  }catch(e){ /* storage optional — app still works without it */ }
+}
+async function mergeSavedCustomColors(){
+  try{
+    const colorsRes = await window.storage.get('lastPuzzleColors', false);
+    if(colorsRes && colorsRes.value){
+      const saved = JSON.parse(colorsRes.value);
+      saved.forEach(c => { if(!COLORS.find(existing => existing.id===c.id)) COLORS.push(c); });
+    }
+  }catch(e){}
+}
+async function loadLastPuzzle(){
+  await mergeSavedCustomColors();
+  try{
+    const res = await window.storage.get('lastPuzzle', false);
+    if(res && res.value) return JSON.parse(res.value);
+  }catch(e){}
+  return null;
+}
+
+/* ---------- events ---------- */
+function wireEvents(){
+  document.getElementById('modeBuildBtn').addEventListener('click', ()=>{ mode='build'; setModeButtons(); });
+  document.getElementById('modePlayBtn').addEventListener('click', ()=>{ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); });
+  document.getElementById('modeScanBtn').addEventListener('click', ()=>{ mode='scan'; setModeButtons(); });
+  initScanUI();
+
+  document.getElementById('newBoardBtn').addEventListener('click', ()=>{
+    const cap = Math.max(2, Math.min(8, parseInt(document.getElementById('capInput').value)||4));
+    const count = Math.max(2, Math.min(16, parseInt(document.getElementById('tubeCountInput').value)||6));
+    state = { capacity: cap, tubes: freshTubes(count, cap) };
+    history = []; visitedStates = new Set([hashState(state)]); selected=null; lastSolve=null;
+    document.getElementById('panel').innerHTML='';
+    renderBoard();
+  });
+
+  document.getElementById('dupBtn').addEventListener('click', async ()=>{
+    const last = await loadLastPuzzle();
+    if(!last){ setStatus('No saved puzzle yet \u2014 build one first.', 'bad'); return; }
+    state = { capacity: last.capacity, tubes: last.tubes.map(t=>t.slice()) };
+    document.getElementById('capInput').value = state.capacity;
+    document.getElementById('tubeCountInput').value = state.tubes.length;
+    history=[]; visitedStates = new Set([hashState(state)]); selected=null;
+    renderBoard();
+    setStatus('Duplicated your last puzzle \u2014 edit any tubes that differ.', null);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    state.tubes = state.tubes.map(()=>[]);
+    history=[]; visitedStates = new Set([hashState(state)]); selected=null; renderBoard();
+  });
+
+  document.getElementById('undoBtn').addEventListener('click', ()=>{
+    if(history.length===0) return;
+    state = history.pop(); selected=null; renderBoard();
+    setStatus('Move undone.', null);
+  });
+
+  document.getElementById('adviseBtn').addEventListener('click', ()=>{
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+    const result = advise(state, {depth:8, topN:3, avoidStateHashes: visitedStates});
+    renderAdvicePanel(result);
+  });
+
+  document.getElementById('solveBtn').addEventListener('click', ()=>{
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+    setStatus('Thinking\u2026', null);
+    setTimeout(()=>{
+      const result = solve(state, {maxStates:150000});
+      lastSolve = result;
+      renderSolvePanel(result);
+    }, 30);
+  });
+}
+
+init();
+
+// Register service worker only when actually deployed (e.g. on GitHub Pages, not in a sandboxed preview).
+if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{ /* preview environments may not support this */ });
+}
+</script>
+</body>
+</html>
