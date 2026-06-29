@@ -63,6 +63,10 @@
   .tube-wrap{display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer;
     user-select:none;}
   .tube-idx{font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+  .tube-label-row{display:flex; align-items:center; gap:6px;}
+  .tube-reset{font-size:13px; color:var(--muted); cursor:pointer; line-height:1; padding:2px;
+    border-radius:4px; transition:.12s;}
+  .tube-reset:hover, .tube-reset:active{color:var(--danger); background:rgba(226,87,76,.12);}
   .tube{width:38px; height:140px; border:2px solid var(--line); border-radius:6px 6px 16px 16px;
     background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
     display:flex; flex-direction:column-reverse; padding:3px; gap:2px; position:relative;
@@ -75,7 +79,28 @@
   .cell.unknown{background:repeating-linear-gradient(45deg, #3a4150, #3a4150 4px, #2a3140 4px, #2a3140 8px);}
   .cell::after{content:""; position:absolute; top:1px; left:2px; right:2px; height:30%;
     background:rgba(255,255,255,.13); border-radius:2px;}
+  .cell.editable{cursor:pointer;}
+  .cell.editable:active{transform:scale(0.93);}
+  .cell-delete{position:absolute; top:-6px; right:-6px; width:16px; height:16px; border-radius:50%;
+    background:var(--danger); color:#fff; font-size:11px; line-height:16px; text-align:center;
+    cursor:pointer; z-index:2; box-shadow:0 0 0 2px var(--bg);}
   .empty-slot{flex:1;}
+  .empty-slot.fillable{cursor:pointer; border:1px dashed var(--line); border-radius:3px;}
+  .empty-slot.fillable:hover, .empty-slot.fillable:active{border-color:var(--accent); background:rgba(79,209,197,.08);}
+
+  /* ---------- Color Counts ---------- */
+  #colorCounts{padding:0 14px 10px; display:flex; flex-wrap:wrap; gap:6px;}
+  #colorCounts:empty{display:none;}
+  .cc-chip{display:flex; align-items:center; gap:5px; background:var(--surface); border:1px solid var(--line);
+    border-radius:9px; padding:4px 7px; font-size:11px; font-family:'JetBrains Mono',monospace;}
+  .cc-chip .cc-dot{width:11px; height:11px; border-radius:50%; flex:0 0 auto;}
+  .cc-chip input{width:28px; background:var(--surface-2); border:1px solid var(--line); border-radius:5px;
+    color:var(--text); font-size:11px; text-align:center; font-family:'JetBrains Mono',monospace; padding:1px;}
+  .cc-chip .cc-remaining{color:var(--muted);}
+  .cc-chip.cc-remaining-zero .cc-remaining{color:var(--accent);}
+  .cc-status{width:100%; font-size:11.5px; color:var(--muted); padding:2px 2px 0;}
+  .cc-status.cc-warn{color:var(--danger);}
+  .cc-status.cc-good{color:var(--accent);}
 
   /* ---------- Palette ---------- */
   #palette{padding:8px 14px 14px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;}
@@ -178,6 +203,8 @@
 
   <div id="palette"></div>
 
+  <div id="colorCounts"></div>
+
   <div class="actions">
     <button class="undo" id="undoBtn">Undo</button>
     <button class="advise" id="adviseBtn">Get Advice</button>
@@ -249,6 +276,39 @@ function legalMoves(state){
 }
 function isSolved(state){ return state.tubes.every(t=>t.length===0||isTubeSolved(t,state.capacity)); }
 function hashState(state){ return state.tubes.map(t=>t.join(',')).sort().join('|'); }
+
+/* ---- Color-count deduction (seeing through uncertainty) ---- */
+function countVisibleColors(state){
+  const counts={};
+  for(const tube of state.tubes) for(const c of tube) if(c!==UNKNOWN) counts[c]=(counts[c]||0)+1;
+  return counts;
+}
+function countUnknownCells(state){
+  let n=0; for(const tube of state.tubes) for(const c of tube) if(c===UNKNOWN) n++; return n;
+}
+function deduceRemaining(state, colorTotals){
+  const visible=countVisibleColors(state); const remaining={};
+  for(const color in colorTotals) remaining[color]=colorTotals[color]-(visible[color]||0);
+  return remaining;
+}
+function checkColorConsistency(state, colorTotals){
+  const remaining=deduceRemaining(state, colorTotals);
+  const totalUnknown=countUnknownCells(state);
+  const sumRemaining=Object.values(remaining).reduce((a,b)=>a+b,0);
+  const negativeColors=Object.entries(remaining).filter(([,n])=>n<0).map(([c])=>c);
+  return {ok: negativeColors.length===0 && sumRemaining===totalUnknown, totalUnknown, sumRemaining, remaining, negativeColors};
+}
+function resolveForcedUnknowns(state, colorTotals){
+  const check=checkColorConsistency(state, colorTotals);
+  if(!check.ok || check.totalUnknown===0) return null;
+  const nonZero=Object.entries(check.remaining).filter(([,n])=>n>0);
+  if(nonZero.length!==1) return null;
+  const [forcedColor,count]=nonZero[0];
+  if(count!==check.totalUnknown) return null;
+  const next=cloneState(state);
+  next.tubes=next.tubes.map(t=>t.map(c=> c===UNKNOWN ? forcedColor : c));
+  return {state:next, resolvedColor:forcedColor, count};
+}
 
 /* =========================================================================
    SCREENSHOT READER (Phase 5) — hardened version
@@ -533,6 +593,46 @@ function solve(initialState, opts){
   }
   return {success:false, moves:null, statesExplored, exhausted:false};
 }
+
+/* ---- Speculative solving under genuine multi-color uncertainty ----
+   Fills '?' cells with a random pool drawn from the deduced remaining counts (consistent with
+   what's actually known, not pure guessing), solves that filled board, and repeats many times.
+   Aggregating which first move appears in a working solution most often gives an honest,
+   quantified recommendation instead of a silent guess. */
+function fillRandomConsistent(state, remaining, rng){
+  const pool=[];
+  for(const color in remaining) for(let i=0;i<remaining[color];i++) pool.push(color);
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  const next=cloneState(state); let p=0;
+  next.tubes.forEach(tube=>{ for(let i=0;i<tube.length;i++){ if(tube[i]===UNKNOWN){ tube[i]=pool[p++]; } } });
+  return next;
+}
+function speculativeAdvise(state, colorTotals, opts){
+  opts=opts||{};
+  const samples=opts.samples||40, maxStates=opts.maxStates||8000, maxDepth=opts.maxDepth||60;
+  const check=checkColorConsistency(state, colorTotals);
+  if(!check.ok) return {error:'inconsistent', check};
+  if(check.totalUnknown===0){
+    const result=solve(state, {maxStates, maxDepth});
+    return {error:null, samplesRun:1, solvableFraction: result.success?1:0,
+      topMoves: (result.success && result.moves.length) ? [{from:result.moves[0].from, to:result.moves[0].to, winRate:1}] : []};
+  }
+  let s=opts.seed||1; const rng=()=>{ s=(s*9301+49297)%233280; return s/233280; };
+  const moveVotes={}; let solvableCount=0;
+  for(let i=0;i<samples;i++){
+    const filled=fillRandomConsistent(state, check.remaining, rng);
+    const result=solve(filled, {maxStates, maxDepth});
+    if(result.success && result.moves.length>0){
+      solvableCount++;
+      const fm=result.moves[0]; const key=fm.from+'-'+fm.to;
+      moveVotes[key]=moveVotes[key]||{from:fm.from, to:fm.to, wins:0};
+      moveVotes[key].wins++;
+    }
+  }
+  const ranked=Object.values(moveVotes).sort((a,b)=>b.wins-a.wins);
+  return {error:null, samplesRun:samples, solvableFraction: solvableCount/samples,
+    topMoves: ranked.map(m=>({from:m.from, to:m.to, winRate:m.wins/samples}))};
+}
 // Beam search: keeps the top `width` candidate states per ply instead of one greedy path,
 // so a locally-second-best move that opens a better line isn't lost.
 function beamLookahead(state, depth, width){
@@ -661,6 +761,24 @@ let buildPaint = COLORS[0].id; // currently selected paint in build mode
 let selected = null;          // selected tube index in play mode
 let history = [];             // for undo, stack of previous states
 let visitedStates = new Set(); // hashes of every state seen this play session, for loop detection
+let colorTotals = {}; // {colorId: declaredTotalCount} -- user-editable, defaults to capacity
+function ensureColorTotals(){
+  const visible = countVisibleColors(state);
+  Object.keys(visible).forEach(c=>{ if(!(c in colorTotals)) colorTotals[c] = state.capacity; });
+}
+// Tries to silently auto-resolve any fully-forced unknowns (only one color still unaccounted for).
+// Returns true if it changed anything.
+function tryAutoResolve(){
+  ensureColorTotals();
+  const resolved = resolveForcedUnknowns(state, colorTotals);
+  if(resolved){
+    state = resolved.state;
+    visitedStates.add(hashState(state));
+    setStatus(`\u2713 Only ${(COLORS.find(c=>c.id===resolved.resolvedColor)||{}).name || resolved.resolvedColor} was left hidden \u2014 auto-filled ${resolved.count} cell${resolved.count===1?'':'s'}.`, 'good');
+    return true;
+  }
+  return false;
+}
 let pendingReveal = null;     // {tubeIndex} awaiting modal input
 let lastSolve = null;
 
@@ -699,7 +817,15 @@ function renderBoard(){
   board.innerHTML = '';
   state.tubes.forEach((tube, idx)=>{
     const wrap = document.createElement('div'); wrap.className='tube-wrap';
+    const labelRow = document.createElement('div'); labelRow.className='tube-label-row';
     const label = document.createElement('div'); label.className='tube-idx'; label.textContent = '#'+(idx+1);
+    labelRow.appendChild(label);
+    if(mode==='build'){
+      const resetBtn = document.createElement('div'); resetBtn.className='tube-reset'; resetBtn.textContent='\u21ba';
+      resetBtn.title = 'Clear this tube';
+      resetBtn.addEventListener('click', (e)=>{ e.stopPropagation(); tube.length = 0; renderBoard(); });
+      labelRow.appendChild(resetBtn);
+    }
     const tubeEl = document.createElement('div'); tubeEl.className='tube';
     if(selected===idx) tubeEl.classList.add('selected');
     if(isTubeSolved(tube, state.capacity)) tubeEl.classList.add('solved');
@@ -711,15 +837,77 @@ function renderBoard(){
         const colorId = tube[slot];
         cell.className = 'cell' + (colorId===UNKNOWN ? ' unknown':'');
         if(colorId!==UNKNOWN) cell.style.background = colorHex(colorId);
+        if(mode==='build'){
+          cell.classList.add('editable');
+          cell.addEventListener('click', (e)=>{ e.stopPropagation(); tube[slot]=buildPaint; renderBoard(); });
+          const del = document.createElement('div'); del.className='cell-delete'; del.textContent='\u00d7';
+          del.title = 'Remove this cell';
+          del.addEventListener('click', (e)=>{ e.stopPropagation(); tube.splice(slot,1); renderBoard(); });
+          cell.appendChild(del);
+        }
       } else {
         cell.className = 'empty-slot';
+        if(mode==='build' && slot===tube.length){
+          cell.classList.add('fillable');
+          cell.addEventListener('click', (e)=>{ e.stopPropagation(); tube.push(buildPaint); renderBoard(); });
+        }
       }
       tubeEl.appendChild(cell);
     }
-    tubeEl.addEventListener('click', ()=> onTubeClick(idx));
-    wrap.appendChild(tubeEl); wrap.appendChild(label);
+    if(mode!=='build') tubeEl.addEventListener('click', ()=> onTubeClick(idx));
+    wrap.appendChild(tubeEl); wrap.appendChild(labelRow);
     board.appendChild(wrap);
   });
+  renderColorCounts();
+}
+
+function renderColorCounts(){
+  const el = document.getElementById('colorCounts');
+  if(mode==='scan'){ el.innerHTML=''; return; }
+  ensureColorTotals();
+  const visible = countVisibleColors(state);
+  const check = checkColorConsistency(state, colorTotals);
+  el.innerHTML = '';
+  Object.keys(colorTotals).forEach(colorId=>{
+    const vis = visible[colorId] || 0;
+    const remaining = check.remaining[colorId];
+    const chip = document.createElement('div'); chip.className='cc-chip';
+    if(remaining===0) chip.classList.add('cc-remaining-zero');
+    const dot = document.createElement('div'); dot.className='cc-dot'; dot.style.background = colorHex(colorId);
+    const counts = document.createElement('span'); counts.textContent = vis+'/';
+    const input = document.createElement('input'); input.type='number'; input.min='0'; input.max='99';
+    input.value = colorTotals[colorId];
+    input.addEventListener('change', ()=>{
+      colorTotals[colorId] = Math.max(0, parseInt(input.value)||0);
+      if(mode==='play') tryAutoResolve();
+      renderBoard();
+    });
+    const rem = document.createElement('span'); rem.className='cc-remaining';
+    rem.textContent = ' ('+(remaining<0?'!':remaining)+' hidden)';
+    chip.appendChild(dot); chip.appendChild(counts); chip.appendChild(input); chip.appendChild(rem);
+    el.appendChild(chip);
+  });
+  const status = document.createElement('div'); status.className='cc-status';
+  if(Object.keys(colorTotals).length===0){
+    // nothing to show yet
+  } else if(check.negativeColors.length>0){
+    status.classList.add('cc-warn');
+    status.textContent = `\u26a0 ${check.negativeColors.length} color total${check.negativeColors.length===1?'':'s'} too low for what's visible \u2014 fix the total or double-check the board.`;
+  } else if(check.totalUnknown===0){
+    // no hidden cells at all -- nothing to report
+  } else if(!check.ok){
+    status.classList.add('cc-warn');
+    status.textContent = `\u26a0 Color totals don't add up to the ${check.totalUnknown} hidden cell${check.totalUnknown===1?'':'s'} on the board \u2014 double-check totals or the board.`;
+  } else {
+    const stillHidden = Object.entries(check.remaining).filter(([,n])=>n>0);
+    if(stillHidden.length===1){
+      status.classList.add('cc-good');
+      status.textContent = `\u2713 Only one color can still be hidden \u2014 should auto-resolve.`;
+    } else if(stillHidden.length>1){
+      status.textContent = `${check.totalUnknown} cell${check.totalUnknown===1?'':'s'} still hidden, could be: ${stillHidden.map(([c,n])=>n+'\u00d7 '+((COLORS.find(x=>x.id===c)||{}).name||c)).join(', ')}.`;
+    }
+  }
+  if(status.textContent) el.appendChild(status);
 }
 
 function flashIllegal(idx){
@@ -739,11 +927,7 @@ function setStatus(msg, kind){
 }
 
 function onTubeClick(idx){
-  if(mode==='build'){
-    buildClick(idx);
-    return;
-  }
-  // play mode
+  // play mode (build mode now handles clicks per-cell, see renderBoard)
   if(pendingReveal) return; // must resolve modal first
   if(selected===null){
     if(state.tubes[idx].length===0){ return; }
@@ -772,18 +956,6 @@ function onTubeClick(idx){
   saveLastPuzzleSnapshot();
 }
 
-function buildClick(idx){
-  const tube = state.tubes[idx];
-  // left-click-ish single click cycles: fill next empty slot from bottom with current paint,
-  // or if tube is full, clicking removes the top slot (so you can correct mistakes quickly).
-  if(tube.length < state.capacity){
-    tube.push(buildPaint);
-  } else {
-    tube.pop();
-  }
-  renderBoard();
-}
-
 function openRevealModal(tubeIndex){
   const bg = document.getElementById('modalBg');
   const sw = document.getElementById('modalSwatches');
@@ -798,8 +970,9 @@ function openRevealModal(tubeIndex){
       pendingReveal = null;
       bg.style.display='none';
       bg.classList.remove('open');
+      const autoResolved = tryAutoResolve();
       renderBoard();
-      setStatus('Updated hidden color \u2014 continue playing.', null);
+      if(!autoResolved) setStatus('Updated hidden color \u2014 continue playing.', null);
       saveLastPuzzleSnapshot();
     });
     sw.appendChild(el);
@@ -836,7 +1009,7 @@ function renderAdvicePanel(adviceList){
     const conf = document.createElement('div'); conf.className='confidence'; conf.textContent = `confidence ${a.confidence}%`;
     const doBtn = document.createElement('button'); doBtn.className='do'; doBtn.textContent='Play this move';
     doBtn.addEventListener('click', ()=>{
-      if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+      if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); tryAutoResolve(); setModeButtons(); }
       history.push(cloneState(state));
       const {state:next, info} = applyMove(state, a.from, a.to);
       state = next; visitedStates.add(hashState(state)); renderBoard();
@@ -862,15 +1035,50 @@ function renderSolvePanel(result){
       steps.appendChild(s);
     });
     card.appendChild(steps);
-    const note = document.createElement('div'); note.className='reasons'; note.style.marginTop='8px';
-    note.innerHTML = '<li>\u26a0 marks a move that will reveal a hidden cell \u2014 the plan may need a re-solve after you update that color.</li>';
-    card.appendChild(note);
+    if(result.moves.some(m=>m.revealsUnknown)){
+      const note = document.createElement('div'); note.className='reasons'; note.style.marginTop='8px';
+      note.innerHTML = '<li>\u26a0 marks a move that will reveal a hidden cell \u2014 the plan may need a re-solve after you update that color.</li>';
+      card.appendChild(note);
+    }
   } else if(result.exhausted){
     setStatus('Search budget exceeded \u2014 board may be very large or unsolvable as known. Try Advisor for a step-by-step instead.', 'bad');
   } else {
     setStatus('No solution found with current information \u2014 likely blocked by an unrevealed hidden color, or the board has no path to a solve.', 'bad');
   }
   panel.appendChild(card);
+}
+
+function renderSpeculativePanel(result, hiddenCount){
+  const panel = document.getElementById('panel');
+  const status = document.getElementById('statusLine');
+  panel.innerHTML=''; if(status) panel.appendChild(status);
+  const card = document.createElement('div'); card.className='card';
+  if(result.error==='inconsistent'){
+    setStatus('Color totals don\u2019t match the board \u2014 fix the counts above before solving.', 'bad');
+    panel.appendChild(card);
+    return;
+  }
+  const pct = Math.round(result.solvableFraction*100);
+  const title = document.createElement('div'); title.style.fontSize='12.5px'; title.style.marginBottom='8px';
+  title.innerHTML = `<strong>${hiddenCount} cell${hiddenCount===1?'':'s'} still hidden</strong> \u2014 a single guaranteed plan isn\u2019t possible yet. `+
+    `Tried ${result.samplesRun} random fillings consistent with what\u2019s known: <strong>${pct}%</strong> were solvable.`;
+  card.appendChild(title);
+  if(result.topMoves.length>0){
+    const sub = document.createElement('div'); sub.style.fontSize='12px'; sub.style.color='var(--muted)'; sub.style.marginBottom='6px';
+    sub.textContent = 'Most likely good first move, by how often it led to a solve:';
+    card.appendChild(sub);
+    const steps = document.createElement('div'); steps.className='solve-steps';
+    result.topMoves.slice(0,4).forEach(m=>{
+      const s=document.createElement('span'); s.textContent=`#${m.from+1}\u2192#${m.to+1} (${Math.round(m.winRate*100)}%)`;
+      steps.appendChild(s);
+    });
+    card.appendChild(steps);
+  }
+  const note = document.createElement('div'); note.className='reasons'; note.style.marginTop='8px';
+  note.innerHTML = '<li>This is a probability, not a guarantee \u2014 reveal more cells through legal moves to narrow it down, then re-run Solve.</li>';
+  card.appendChild(note);
+  panel.appendChild(card);
+  setStatus(pct>=70 ? `Looking good \u2014 ${pct}% of consistent fillings solve.` : `Uncertain \u2014 only ${pct}% of consistent fillings solve so far.`, pct>=70?'good':'bad');
 }
 
 function setModeButtons(){
@@ -916,7 +1124,7 @@ async function loadLastPuzzle(){
 /* ---------- events ---------- */
 function wireEvents(){
   document.getElementById('modeBuildBtn').addEventListener('click', ()=>{ mode='build'; setModeButtons(); });
-  document.getElementById('modePlayBtn').addEventListener('click', ()=>{ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); });
+  document.getElementById('modePlayBtn').addEventListener('click', ()=>{ mode='play'; visitedStates = new Set([hashState(state)]); tryAutoResolve(); setModeButtons(); });
   document.getElementById('modeScanBtn').addEventListener('click', ()=>{ mode='scan'; setModeButtons(); });
   initScanUI();
 
@@ -952,18 +1160,27 @@ function wireEvents(){
   });
 
   document.getElementById('adviseBtn').addEventListener('click', ()=>{
-    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); tryAutoResolve(); setModeButtons(); }
     const result = advise(state, {depth:8, topN:3, avoidStateHashes: visitedStates});
     renderAdvicePanel(result);
   });
 
   document.getElementById('solveBtn').addEventListener('click', ()=>{
-    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); setModeButtons(); }
+    if(mode!=='play'){ mode='play'; visitedStates = new Set([hashState(state)]); tryAutoResolve(); setModeButtons(); }
+    tryAutoResolve();
+    ensureColorTotals();
+    const hiddenCount = countUnknownCells(state);
     setStatus('Thinking\u2026', null);
     setTimeout(()=>{
-      const result = solve(state, {maxStates:150000});
-      lastSolve = result;
-      renderSolvePanel(result);
+      if(hiddenCount===0){
+        const result = solve(state, {maxStates:150000});
+        lastSolve = result;
+        renderSolvePanel(result);
+      } else {
+        const result = speculativeAdvise(state, colorTotals, {samples:40, maxStates:8000, maxDepth:60});
+        renderSpeculativePanel(result, hiddenCount);
+      }
+      renderBoard();
     }, 30);
   });
 }
